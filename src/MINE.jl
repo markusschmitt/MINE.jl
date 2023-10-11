@@ -111,7 +111,7 @@ function compute_MI(X,Y;
     Flux.loadparams!(T, optimal_params)
     mi = [mutual_info(T, X_valid, Y_valid, Y_valid[:,shuffle(1:end)]) for _ in 1:25]
 
-    return ( sum(mi)/25, std(mi), max(mi...), losses, optimal_params )
+    return ( sum(mi)/25, std(mi), max(mi...), Float32.(losses), optimal_params )
 end
 
 end # module MINE
