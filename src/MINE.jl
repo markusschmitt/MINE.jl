@@ -101,7 +101,8 @@ function compute_MI(X,Y;
             push!(epoch_losses, -loss)  # logging, outside gradient context
         end
         push!(losses, mean(epoch_losses))
-        push!(test_losses, mutual_info(T, X_test, Y_test, Y_test[:,shuffle(1:end)]))
+        test_mi = [mutual_info(T, X_test, Y_test, Y_test[:,shuffle(1:end)]) for _ in 1:25]
+        push!(test_losses, sum(test_mi)/25)
         if size(test_losses)[1]>1
             if max(test_losses[1:end-1]...) < test_losses[end]
                 optimal_params = deepcopy(Flux.params(T))
