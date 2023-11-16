@@ -48,6 +48,7 @@ end
 
 function compute_MI(X,Y; 
                     net_width=100, 
+                    dropout_rate=0.0,
                     learning_rate=1e-4, 
                     num_steps=500, 
                     batch_size=128, 
@@ -61,6 +62,7 @@ function compute_MI(X,Y;
     in_dim = size(X)[1] + size(Y)[1]
     T = Chain(
                 Dense(in_dim => net_width, tanh),
+                Dropout(dropout_rate),
                 Dense(net_width => net_width, tanh),
                 Dense(net_width => 1)
             ) |> gpu
@@ -73,15 +75,24 @@ function compute_MI(X,Y;
     num_test = Int(floor(test_fraction * num_samples))
     num_valid = Int(floor(validation_fraction * num_samples))
     num_train = num_samples - num_test - num_valid
+
+    # normalize to unit variance
+    X = X ./ std(X, dims=2)
+    Y = Y ./ std(Y, dims=2)
+    Z = deepcopy(Y[:,shuffle(1:end)])
     
-    X_train = X[:,1:num_train]
-    Y_train = Y[:,1:num_train]
+    X_train = X[:,1:num_train] |> gpu
+    Y_train = Y[:,1:num_train] |> gpu
+    Z_train = Z[:,1:num_train] |> gpu
     X_test = X[:,num_train+1:num_train+num_test] |> gpu
     Y_test = Y[:,num_train+1:num_train+num_test] |> gpu
+    Z_test = Z[:,num_train+1:num_train+num_test] |> gpu
     X_valid = X[:,num_train+num_test+1:end] |> gpu
     Y_valid = Y[:,num_train+num_test+1:end] |> gpu
+    Z_valid = Z[:,num_train+num_test+1:end] |> gpu
     
-    loader = Flux.DataLoader((X_train, Y_train, Y_train[:,shuffle(1:end)]), batchsize=batch_size, shuffle=true) |> gpu
+    #loader = Flux.DataLoader((X_train, Y_train, Y_train[:,shuffle(1:end)]), batchsize=batch_size, shuffle=true) |> gpu
+    loader = Flux.DataLoader((X_train, Y_train, Z_train), batchsize=batch_size, shuffle=true) |> gpu
     
     # training
     optim = Flux.setup(Flux.Adam(learning_rate), T)
@@ -101,24 +112,28 @@ function compute_MI(X,Y;
             push!(epoch_losses, -loss)  # logging, outside gradient context
         end
         push!(losses, mean(epoch_losses))
-        test_mi = [mutual_info(T, X_test, Y_test, Y_test[:,shuffle(1:end)]) for _ in 1:25]
-        push!(test_losses, sum(test_mi)/25)
+        #test_mi = [mutual_info(T, X_test, Y_test, Y_test[:,shuffle(1:end)]) for _ in 1:25]
+        test_mi = [mutual_info(T, X_test, Y_test, Z_test[:,shuffle(1:end)]) for _ in 1:25]
+        push!(test_losses, mean(test_mi))
         if size(test_losses)[1]>1
             if max(test_losses[1:end-1]...) < test_losses[end]
                 optimal_params = deepcopy(Flux.params(T))
                 max_epoch = epoch
+                #mi = [mutual_info(T, X_valid, Y_valid, Y_valid[:,shuffle(1:end)]) for _ in 1:25]
+                mi = [mutual_info(T, X_valid, Y_valid, Z_valid[:,shuffle(1:end)]) for _ in 1:25]
             end
         end
     end
     
-    mi = [mutual_info(T, X_valid, Y_valid, Y_valid[:,shuffle(1:end)]) for _ in 1:25]
+    #mi = [mutual_info(T, X_valid, Y_valid, Y_valid[:,shuffle(1:end)]) for _ in 1:25]
 
     if max_epoch == num_steps
         println("Warning: Optimization seems not converged.")
     end
     
     Flux.loadparams!(T, optimal_params)
-    mi = [mutual_info(T, X_valid, Y_valid, Y_valid[:,shuffle(1:end)]) for _ in 1:25]
+    #mi = [mutual_info(T, X_valid, Y_valid, Y_valid[:,shuffle(1:end)]) for _ in 1:25]
+    mi = [mutual_info(T, X_valid, Y_valid, Z_valid[:,shuffle(1:end)]) for _ in 1:25]
 
     return ( sum(mi)/25, std(mi), max(mi...), Float32.(losses), Float32.(test_losses), max_epoch, optimal_params )
 end
